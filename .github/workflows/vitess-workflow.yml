@@ -3,7 +3,8 @@ name: Build Connector Vitess
 on:
   push:
     branches:
-      - master
+      - main
+      - 1.*
     paths:
       - 'debezium-core/**'
       - 'debezium-api/**'
@@ -13,7 +14,8 @@ on:
       - '.github/workflows/vitess-workflow.yml'
   pull_request:
     branches:
-      - master
+      - main
+      - 1.*
     paths:
       - 'debezium-core/**'
       - 'debezium-api/**'
@@ -36,6 +38,11 @@ jobs:
         with:
           repository: debezium/debezium-connector-vitess
           path: vitess
+      - name: Setup java 17
+        uses: actions/setup-java@v2
+        with:
+          distribution: 'temurin'
+          java-version: 17
       - name: Cache Maven Packages
         uses: actions/cache@v2
         with:

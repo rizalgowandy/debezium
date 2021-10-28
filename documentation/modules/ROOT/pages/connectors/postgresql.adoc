@@ -307,13 +307,18 @@ See {link-prefix}:{link-postgresql-connector}#setting-up-postgresql[Setting up P
 // ModuleID: default-names-of-kafka-topics-that-receive-debezium-postgresql-change-event-records
 // Title: Default names of Kafka topics that receive {prodname} PostgreSQL change event records
 [[postgresql-topic-names]]
-=== Topics names
+=== Topic names
 
-The PostgreSQL connector writes events for all insert, update, and delete operations on a single table to a single Kafka topic. By default, the Kafka topic name is _serverName_._schemaName_._tableName_ where:
+By default, the PostgreSQL connector writes change events for all `INSERT`, `UPDATE`, and `DELETE` operations that occur in a table to a single Apache Kafka topic that is specific to that table.
+The connector uses the following convention to name change event topics:
 
-* _serverName_ is the logical name of the connector as specified with the `database.server.name` connector configuration property.
-* _schemaName_ is the name of the database schema where the operation occurred.
-* _tableName_ is the name of the database table in which the operation occurred.
+_serverName.schemaName.tableName_
+
+The following list provides definitions for the components of the default name:
+
+_serverName_:: The logical name of the connector, as specified by the xref:postgresql-property-database-server-name[`database.server.name`] configuration property.
+_schemaName_:: The name of the database schema in which the change event occurred.
+_tableName_:: The name of the database table in which the change event occurred.
 
 For example, suppose that `fulfillment` is the logical server name in the configuration for a connector that is capturing changes in a PostgreSQL installation that has a `postgres` database and an `inventory` schema that contains four tables: `products`, `products_on_hand`, `customers`, and `orders`. The connector would stream records to these four Kafka topics:
 
@@ -328,6 +333,12 @@ Now suppose that the tables are not part of a specific schema but were created i
 * `fulfillment.public.products_on_hand`
 * `fulfillment.public.customers`
 * `fulfillment.public.orders`
+
+The connector applies similar naming conventions to label its xref:postgresql-transaction-metadata[transaction metadata topics].
+
+If the default topic name do not meet your requirements, you can configure custom topic names.
+To configure custom topic names, you specify regular expressions in the logical topic routing SMT.
+For more information about using the logical topic routing SMT to customize topic naming, see {link-prefix}:{link-topic-routing}#topic-routing[Topic routing].
 
 // Type: concept
 // ModuleID: metadata-in-debezium-postgresql-change-event-records
@@ -1911,10 +1922,10 @@ As of PostgreSQL 9.4, the only way to read changes to the write-ahead-log is to 
 The PostgreSQL connector works with one of {prodname}'s supported logical decoding plug-ins to encode the changes in either link:https://github.com/google/protobuf[Protobuf format] or link:http://www.json.org/[JSON] format.
 See the documentation for your chosen plug-in to learn more about the plug-in's requirements, limitations, and how to compile it.
 
-* link:https://github.com/debezium/postgres-decoderbufs/blob/master/README.md[`protobuf`]
+* link:https://github.com/debezium/postgres-decoderbufs/blob/main/README.md[`protobuf`]
 * link:https://github.com/eulerto/wal2json/blob/master/README.md[`wal2json`]
 
-For simplicity, {prodname} also provides a container image based on the upstream PostgreSQL server image, on top of which it compiles and installs the plug-ins. You can link:https://github.com/debezium/docker-images/tree/master/postgres/13[use this image] as an example of the detailed steps required for the installation.
+For simplicity, {prodname} also provides a container image based on the upstream PostgreSQL server image, on top of which it compiles and installs the plug-ins. You can link:https://github.com/debezium/docker-images/tree/main/postgres/13[use this image] as an example of the detailed steps required for the installation.
 
 [WARNING]
 ====
@@ -1937,7 +1948,7 @@ See the documentation of `columns_diff_exclude_unchanged_toast` further below fo
 * The `pgoutput` plug-in does not emit all events for tables without primary keys. It emits only events for `INSERT` operations.
 * While all plug-ins will refresh schema metadata from the database upon detection of a schema change during streaming, the `pgoutput` plug-in is somewhat more 'eager' about triggering such refreshes. For example, a change to the default value for a column will trigger a refresh with `pgoutput`, while other plug-ins will not be aware of this change until another change triggers a refresh (eg. addition of a new column.) This is due to the behaviour of `pgoutput`, rather than {prodname} itself.
 
-All up-to-date differences are tracked in a test suite link:https://github.com/debezium/debezium/blob/master/debezium-connector-postgres/src/test/java/io/debezium/connector/postgresql/DecoderDifferences.java[Java class].
+All up-to-date differences are tracked in a test suite link:https://github.com/debezium/debezium/blob/main/debezium-connector-postgres/src/test/java/io/debezium/connector/postgresql/DecoderDifferences.java[Java class].
 
 [[postgresql-server-configuration]]
 === Configuring the PostgreSQL server
@@ -2702,18 +2713,34 @@ See the {link-prefix}:{link-postgresql-connector}#postgresql-data-types[list of 
 
 |[[postgresql-property-message-key-columns]]<<postgresql-property-message-key-columns, `+message.key.columns+`>>
 |_empty string_
-|A semicolon separated list of tables with regular expressions that match table column names. The connector maps values in matching columns to key fields in change event records that it sends to Kafka topics. This is useful when a table does not have a primary key, or when you want to order change event records in a Kafka topic according to a field that is not a primary key. +
- +
-Separate entries with semicolons. Insert a colon between the fully-qualified table name and its regular expression. The format is: +
- +
-_schema-name_._table-name_:_regexp_;... +
- +
-For example, +
- +
-`schemaA.table_a:regex_1;schemaB.table_b:regex_2;schemaC.table_c:regex_3` +
- +
-If `table_a` has a an `id` column, and `regex_1` is `^i` (matches any column that starts with `i`), the connector maps the value in ``table_a``'s `id` column to a key field in change events that the connector sends to Kafka.
+|A list of expressions that specify the columns that the connector uses to form custom message keys for change event records that it publishes to the Kafka topics for specified tables.
 
+By default, {prodname} uses the primary key column of a table as the message key for records that it emits.
+In place of the default, or to specify a key for tables that lack a primary key, you can configure custom message keys based on one or more columns. +
+ +
+To establish a custom message key for a table, list the table, followed by the columns to use as the message key.
+Each list entry takes the following format: +
+ +
+`_<fully-qualified_tableName>_:_<keyColumn>_,_<keyColumn>_` +
+ +
+To base a table key on multiple column names, insert commas between the column names.
+
+Each fully-qualified table name is a regular expression in the following format: +
+ +
+`_<schemaName>_._<tableName>_` +
+ +
+The property can include entries for multiple tables.
+Use a semicolon to separate table entries in the list. +
+ +
+The following example sets the message key for the tables `inventory.customers` and `purchase.orders`: +
+ +
+`inventory.customers:pk1,pk2;(.*).purchaseorders:pk3,pk4` +
+ +
+For the table `inventory.customer`, the columns `pk1` and `pk2` are specified as the message key.
+For the `purchaseorders` tables in any schema, the columns `pk3` and `pk4` server as the message key.
+
+There is no limit to the number of columns that you use to create custom message keys.
+However, it's best to use the minimum number that are required to specify a unique key.
 |[[postgresql-publication-autocreate-mode]]<<postgresql-publication-autocreate-mode, `+publication.autocreate.mode+`>>
 |_all_tables_
 |Applies only when streaming changes by using link:https://www.postgresql.org/docs/current/sql-createpublication.html[the `pgoutput` plug-in]. The setting determines how creation of a link:https://www.postgresql.org/docs/current/logical-replication-publication.html[publication] should work. Possible settings are: +

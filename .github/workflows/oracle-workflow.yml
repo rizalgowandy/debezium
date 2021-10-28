@@ -3,7 +3,8 @@ name: Build Oracle Connector
 on:
   push:
     branches:
-      - master
+      - main
+      - 1.*
     paths:
       - 'support/checkstyle/**'
       - 'support/ide-configs/**'
@@ -23,7 +24,8 @@ on:
       - '.github/workflows/oracle-workflow.yml'
   pull_request:
     branches:
-      - master
+      - main
+      - 1.*
     paths:
       - 'support/checkstyle/**'
       - 'support/ide-configs/**'
@@ -47,6 +49,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - name: Setup java 17
+        uses: actions/setup-java@v2
+        with:
+          distribution: 'temurin'
+          java-version: 17
       - name: Cache local Maven repository
         uses: actions/cache@v2
         with:

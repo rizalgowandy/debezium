@@ -17,6 +17,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoField;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.apache.kafka.connect.data.Field;
@@ -27,6 +28,7 @@ import io.debezium.annotation.Immutable;
 import io.debezium.relational.Column;
 import io.debezium.relational.ColumnEditor;
 import io.debezium.relational.ValueConverter;
+import io.debezium.util.Collect;
 
 /**
  * This class is used by a DDL parser to convert the string default value to a Java type
@@ -46,6 +48,11 @@ public class MySqlDefaultValueConverter {
     private static final String EPOCH_TIMESTAMP = "1970-01-01 00:00:00";
 
     private static final String EPOCH_DATE = "1970-01-01";
+
+    @Immutable
+    private static final Set<Integer> TRIM_DATA_TYPES = Collect.unmodifiableSet(Types.TINYINT, Types.INTEGER,
+            Types.DATE, Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE, Types.TIME, Types.BOOLEAN, Types.BIT,
+            Types.NUMERIC, Types.DECIMAL, Types.FLOAT, Types.DOUBLE, Types.REAL);
 
     private static final DateTimeFormatter ISO_LOCAL_DATE_WITH_OPTIONAL_TIME = new DateTimeFormatterBuilder()
             .append(DateTimeFormatter.ISO_LOCAL_DATE)
@@ -72,6 +79,11 @@ public class MySqlDefaultValueConverter {
     public Object convert(Column column, String value) {
         if (value == null) {
             return value;
+        }
+
+        // trim non varchar data types before converting
+        if (TRIM_DATA_TYPES.contains(column.jdbcType())) {
+            value = value.trim();
         }
 
         // boolean is also INT(1) or TINYINT(1)

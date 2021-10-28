@@ -14,11 +14,13 @@ import java.text.DecimalFormat;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -43,6 +45,8 @@ import io.debezium.jdbc.JdbcConfiguration;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
 import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
+import io.debezium.relational.Column;
+import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
 import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
@@ -54,6 +58,7 @@ import io.debezium.util.Metronome;
 public class LogMinerStreamingChangeEventSource implements StreamingChangeEventSource<OraclePartition, OracleOffsetContext> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LogMinerStreamingChangeEventSource.class);
+    private static final int MAXIMUM_NAME_LENGTH = 30;
     private static final String ALL_COLUMN_LOGGING = "ALL COLUMN LOGGING";
 
     private final OracleConnection jdbcConnection;
@@ -111,7 +116,7 @@ public class LogMinerStreamingChangeEventSource implements StreamingChangeEventS
                 }
 
                 setNlsSessionParameters(jdbcConnection);
-                checkSupplementalLogging(jdbcConnection, connectorConfig.getPdbName(), schema);
+                checkDatabaseAndTableState(jdbcConnection, connectorConfig.getPdbName(), schema);
 
                 try (LogMinerEventProcessor processor = createProcessor(context, partition, offsetContext)) {
 
@@ -396,6 +401,7 @@ public class LogMinerStreamingChangeEventSource implements StreamingChangeEventS
             streamingMetrics.addCurrentMiningSessionStart(Duration.between(start, Instant.now()));
         }
         catch (SQLException e) {
+            LOGGER.error("Got exception when starting mining session.", e);
             // Capture the database state before throwing the exception up
             LogMinerDatabaseStateWriter.write(connection);
             throw e;
@@ -482,20 +488,43 @@ public class LogMinerStreamingChangeEventSource implements StreamingChangeEventS
                 LOGGER.debug("Top SCN calculation resulted in end before start SCN, using current SCN {} as end SCN.", currentScn);
                 return currentScn;
             }
-            LOGGER.debug("Using Top SCN calculation {} as end SCN.", topScnToMine);
+
+            if (prevEndScn != null) {
+                final Scn deltaScn = currentScn.subtract(prevEndScn);
+                if (deltaScn.compareTo(Scn.valueOf(connectorConfig.getLogMiningScnGapDetectionGapSizeMin())) > 0) {
+                    Optional<OffsetDateTime> prevEndScnTimestamp = connection.getScnToTimestamp(prevEndScn);
+                    if (prevEndScnTimestamp.isPresent()) {
+                        Optional<OffsetDateTime> currentScnTimestamp = connection.getScnToTimestamp(currentScn);
+                        if (currentScnTimestamp.isPresent()) {
+                            long timeDeltaMs = ChronoUnit.MILLIS.between(prevEndScnTimestamp.get(), currentScnTimestamp.get());
+                            if (timeDeltaMs < connectorConfig.getLogMiningScnGapDetectionTimeIntervalMaxMs()) {
+                                LOGGER.warn("Detected possible SCN gap, using current SCN, startSCN {}, prevEndScn {} timestamp {}, current SCN {} timestamp {}.",
+                                        startScn,
+                                        prevEndScn, prevEndScnTimestamp.get(), currentScn, currentScnTimestamp.get());
+                                return currentScn;
+                            }
+                        }
+                    }
+                }
+            }
+
+            LOGGER.debug("Using Top SCN calculation {} as end SCN. currentScn {}, startScn {}", topScnToMine, currentScn, startScn);
             return topScnToMine;
         }
     }
 
     /**
-     * Validates the supplemental logging configuration for the source database and its captured tables.
+     * Checks and validates the database's supplemental logging configuration as well as the lengths of the
+     * table and column names that are part of the database schema.
      *
      * @param connection database connection, should not be {@code null}
      * @param pdbName pluggable database name, can be {@code null} when not using pluggable databases
      * @param schema connector's database schema, should not be {@code null}
      * @throws SQLException if a database exception occurred
      */
-    private void checkSupplementalLogging(OracleConnection connection, String pdbName, OracleDatabaseSchema schema) throws SQLException {
+    private void checkDatabaseAndTableState(OracleConnection connection, String pdbName, OracleDatabaseSchema schema) throws SQLException {
+        final Instant start = Instant.now();
+        LOGGER.trace("Checking database and table state, this may take time depending on the size of your schema.");
         try {
             if (pdbName != null) {
                 connection.setSessionToPdb(pdbName);
@@ -516,12 +545,38 @@ public class LogMinerStreamingChangeEventSource implements StreamingChangeEventS
                                 + "Use: ALTER TABLE " + tableId.schema() + "." + tableId.table()
                                 + " ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS");
                     }
+                    checkTableColumnNameLengths(schema.tableFor(tableId));
+                }
+            }
+            else {
+                // ALL supplemental logging is enabled, now check table/column lengths
+                for (TableId tableId : schema.getTables().tableIds()) {
+                    checkTableColumnNameLengths(schema.tableFor(tableId));
                 }
             }
         }
         finally {
             if (pdbName != null) {
                 connection.resetSessionToCdb();
+            }
+        }
+        LOGGER.trace("Database and table state check finished after {} ms", Duration.between(start, Instant.now()).toMillis());
+    }
+
+    /**
+     * Examines the table and column names and logs a warning if any name exceeds {@link #MAXIMUM_NAME_LENGTH}.
+     *
+     * @param table the table, should not be {@code null}
+     */
+    private void checkTableColumnNameLengths(Table table) {
+        if (table.id().table().length() > MAXIMUM_NAME_LENGTH) {
+            LOGGER.warn("Table '{}' won't be captured by Oracle LogMiner because its name exceeds {} characters.",
+                    table.id().table(), MAXIMUM_NAME_LENGTH);
+        }
+        for (Column column : table.columns()) {
+            if (column.name().length() > MAXIMUM_NAME_LENGTH) {
+                LOGGER.warn("Table '{}' won't be captured by Oracle LogMiner because column '{}' exceeds {} characters.",
+                        table.id().table(), column.name(), MAXIMUM_NAME_LENGTH);
             }
         }
     }

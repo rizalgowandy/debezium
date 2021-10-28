@@ -95,10 +95,16 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
                         schemaNameAdjuster,
                         connectorConfig.customConverterRegistry(),
                         connectorConfig.getSourceInfoStructMaker().schema(),
-                        connectorConfig.getSanitizeFieldNames()),
+                        connectorConfig.getSanitizeFieldNames(),
+                        false),
                 tableIdCaseInsensitive, connectorConfig.getKeyMapper());
 
-        this.ddlParser = new MySqlAntlrDdlParser(valueConverter, getTableFilter());
+        this.ddlParser = new MySqlAntlrDdlParser(
+                true,
+                false,
+                connectorConfig.isSchemaCommentsHistoryEnabled(),
+                valueConverter,
+                getTableFilter());
         this.ddlChanges = this.ddlParser.getDdlChanges();
         this.connectorConfig = connectorConfig;
         filters = connectorConfig.getTableFilters();

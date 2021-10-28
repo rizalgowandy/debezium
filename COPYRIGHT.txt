@@ -61,6 +61,7 @@ Chris Cranford
 Chris Egerton
 Chris Riccomini
 Christian Posta
+Christopher Burch
 Christopher Sang
 Chuck Ha
 Cliff Wheadon
@@ -97,6 +98,7 @@ Eric S. Kreiseir
 Erik Malm
 Ewen Cheslack-Postava
 Fabian Aussems
+Fabian Martinez
 Fabio Cantarini
 Fahim Farook
 Faizan
@@ -115,10 +117,12 @@ Guillaume Rosauro
 Guillaume Smet
 Gunnar Morling
 Gurnaaz Randhawa
+Guy Korland
 Guy Pascarella
 Grzegorz Kołakowski
 Jan Hendrik Dolling
 Jiabao Sun
+Juan Fiallo
 Hans-Peter Grahsl
 Harvey Yue
 Henryk Konsek
@@ -182,6 +186,7 @@ Kevin Pullin
 Kewei Shang
 Krizhan Mariampillai
 Kyley Jex
+Laurent Broudoux
 Leo Mei
 Lev Zemlyanov
 Linh Nguyen Hoang
@@ -244,6 +249,7 @@ Peter Junos
 Peter Larsson
 Peter Urbanetz
 Philip Sanetra
+Plugaru Tudor
 Pradeep Mamillapalli
 Prannoy Mittal
 Preethi Sadagopan
@@ -290,6 +296,7 @@ Stathis Souris
 Stefan Miklosovic
 Stephen Powis
 Steven Siahetiong
+Sungho Hwang
 Syed Muhammad Sufyian
 Tapani Moilanen
 Tautvydas Januskevicius
@@ -324,6 +331,7 @@ Wei Wu
 WenZe Hu
 William Pursell
 Willie Cheong
+Willie Zhu
 Wout Scheepers
 Xiao Fu
 Xiaopu Zhu
@@ -336,8 +344,10 @@ Yoann Rodière
 Yossi Shirizli
 Yuan Zhang
 Zheng Wang
+Zongwen Li
 Zoran Regvart
 志飞 张
-李宗文
 민규 김
+李宗文
+陆杰
 Ünal Sürmeli

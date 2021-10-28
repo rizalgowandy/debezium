@@ -327,13 +327,13 @@ public class MemoryLogMinerEventProcessor extends AbstractLogMinerEventProcessor
     @Override
     protected void handleSchemaChange(LogMinerEventRow row) throws InterruptedException {
         super.handleSchemaChange(row);
-        if (row.getTableName() != null) {
+        if (row.getTableName() != null && getConfig().isLobEnabled()) {
             schemaChangesCache.add(row.getScn());
         }
     }
 
     private PreparedStatement createQueryStatement() throws SQLException {
-        final String query = LogMinerQueryBuilder.build(getConfig());
+        final String query = LogMinerQueryBuilder.build(getConfig(), getSchema());
         return jdbcConnection.connection().prepareStatement(query,
                 ResultSet.TYPE_FORWARD_ONLY,
                 ResultSet.CONCUR_READ_ONLY,

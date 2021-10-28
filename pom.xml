@@ -55,6 +55,9 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
+        <!-- Can't use the (generally preferable) release option yet, as the
+             Cassandra connector still needs to be built with Java 1.8 which
+             isn't aware of this option -->
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
 
@@ -93,7 +96,7 @@
         <release.endpoint>https://s01.oss.sonatype.org/</release.endpoint>
 
         <!-- Kafka and it's dependencies MUST reflect what the Kafka version uses -->
-        <version.kafka>2.8.0</version.kafka>
+        <version.kafka>3.0.0</version.kafka>
         <version.zookeeper>3.5.9</version.zookeeper>
         <version.jackson>2.10.5</version.jackson>
         <version.jackson.databind>2.10.5.1</version.jackson.databind>
@@ -113,10 +116,10 @@
         <quarkus.version>2.2.3.Final</quarkus.version>
 
         <!-- Database drivers, should align with databases -->
-        <version.postgresql.driver>42.2.22</version.postgresql.driver>
+        <version.postgresql.driver>42.2.24</version.postgresql.driver>
         <version.mysql.driver>8.0.26</version.mysql.driver>
-        <version.mysql.binlog>0.25.3</version.mysql.binlog>
-        <version.mongo.driver>4.2.1</version.mongo.driver>
+        <version.mysql.binlog>0.25.4</version.mysql.binlog>
+        <version.mongo.driver>4.3.3</version.mongo.driver>
         <version.sqlserver.driver>7.2.2.jre8</version.sqlserver.driver>
         <version.oracle.driver>21.1.0.0</version.oracle.driver>
         <version.db2.driver>11.5.0.0</version.db2.driver>

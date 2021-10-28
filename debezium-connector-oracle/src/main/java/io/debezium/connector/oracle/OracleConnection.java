@@ -12,6 +12,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -38,6 +40,8 @@ import io.debezium.relational.TableId;
 import io.debezium.relational.Tables;
 import io.debezium.relational.Tables.ColumnNameFilter;
 import io.debezium.relational.Tables.TableFilter;
+import io.debezium.util.Clock;
+import io.debezium.util.Metronome;
 import io.debezium.util.Strings;
 
 import oracle.jdbc.OracleTypes;
@@ -372,12 +376,34 @@ public class OracleConnection extends JdbcConnection {
 
         query += ")";
 
-        return queryAndMap(query, (rs) -> {
-            if (rs.next()) {
-                return Scn.valueOf(rs.getString(1)).subtract(Scn.valueOf(1));
+        try {
+            Metronome sleeper = Metronome.sleeper(Duration.ofSeconds(1), Clock.SYSTEM);
+            int retries = 5;
+            while (retries-- > 0) {
+                Scn maxArchiveLogScn = queryAndMap(query, (rs) -> {
+                    if (rs.next()) {
+                        final String value = rs.getString(1);
+                        if (value != null) {
+                            return Scn.valueOf(value).subtract(Scn.valueOf(1));
+                        }
+                    }
+                    // if we failed to get a result or the value was null, returning Scn.NULL implies
+                    // that we should try again until we exhaust the retry attempts.
+                    return Scn.NULL;
+                });
+                if (!maxArchiveLogScn.isNull()) {
+                    // value was received, return it.
+                    return maxArchiveLogScn;
+                }
+                LOGGER.info("Query to get max archive log SCN returned no value, checking again in 1 second.");
+                sleeper.pause();
             }
-            throw new DebeziumException("Could not obtain maximum archive log scn.");
-        });
+            // retry attempts exhausted, throw exception
+            throw new DebeziumException("Could not obtain maximum archive log SCN.");
+        }
+        catch (InterruptedException e) {
+            throw new DebeziumException("Failed to obtain maximum archive log SCN.", e);
+        }
     }
 
     /**
@@ -441,7 +467,23 @@ public class OracleConnection extends JdbcConnection {
      * @throws SQLException if a database exception occurred
      */
     public boolean isTableEmpty(String tableName) throws SQLException {
-        return queryAndMap("SELECT COUNT(1) FROM " + tableName, rs -> rs.next() && rs.getLong(1) == 0);
+        return getRowCount(tableName) == 0L;
+    }
+
+    /**
+     * Returns the number of rows in a given table.
+     *
+     * @param tableName table name, should not be {@code null}
+     * @return the number of rows
+     * @throws SQLException if a database exception occurred
+     */
+    public long getRowCount(String tableName) throws SQLException {
+        return queryAndMap("SELECT COUNT(1) FROM " + tableName, rs -> {
+            if (rs.next()) {
+                return rs.getLong(1);
+            }
+            return 0L;
+        });
     }
 
     public <T> T singleOptionalValue(String query, ResultSetExtractor<T> extractor) throws SQLException {
@@ -481,5 +523,52 @@ public class OracleConnection extends JdbcConnection {
 
     private static ConnectionFactory resolveConnectionFactory(Configuration config) {
         return JdbcConnection.patternBasedFactory(connectionString(config));
+    }
+
+    /**
+     * Determine whether the Oracle server has the archive log enabled.
+     *
+     * @return {@code true} if the server's {@code LOG_MODE} is set to {@code ARCHIVELOG}, or {@code false} otherwise
+     */
+    protected boolean isArchiveLogMode() {
+        try {
+            final String mode = queryAndMap("SELECT LOG_MODE FROM V$DATABASE", rs -> rs.next() ? rs.getString(1) : "");
+            LOGGER.debug("LOG_MODE={}", mode);
+            return "ARCHIVELOG".equalsIgnoreCase(mode);
+        }
+        catch (SQLException e) {
+            throw new DebeziumException("Unexpected error while connecting to Oracle and looking at LOG_MODE mode: ", e);
+        }
+    }
+
+    /**
+     * Resolve a system change number to a timestamp, return value is in database timezone.
+     *
+     * The SCN to TIMESTAMP mapping is only retained for the duration of the flashback query area.
+     * This means that eventually the mapping between these values are no longer kept by Oracle
+     * and making a call with a SCN value that has aged out will result in an ORA-08181 error.
+     * This function explicitly checks for this use case and if a ORA-08181 error is thrown, it is
+     * therefore treated as if a value does not exist returning an empty optional value.
+     *
+     * @param scn the system change number, must not be {@code null}
+     * @return an optional timestamp when the system change number occurred
+     * @throws SQLException if a database exception occurred
+     */
+    public Optional<OffsetDateTime> getScnToTimestamp(Scn scn) throws SQLException {
+        try {
+            return queryAndMap("SELECT scn_to_timestamp('" + scn + "') FROM DUAL", rs -> rs.next()
+                    ? Optional.of(rs.getObject(1, OffsetDateTime.class))
+                    : Optional.empty());
+        }
+        catch (SQLException e) {
+            if (e.getMessage().startsWith("ORA-08181")) {
+                // ORA-08181 specified number is not a valid system change number
+                // This happens when the SCN provided is outside the flashback area range
+                // This should be treated as a value is not available rather than an error
+                return Optional.empty();
+            }
+            // Any other SQLException should be thrown
+            throw e;
+        }
     }
 }

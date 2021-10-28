@@ -2032,6 +2032,8 @@ table_compression
         ( BASIC
         | FOR ( OLTP
               | (QUERY | ARCHIVE) (LOW | HIGH)?
+              | ALL OPERATIONS
+              | DIRECT_LOAD OPERATIONS
               )
         )?
     | ROW STORE COMPRESS (BASIC | ADVANCED)?
@@ -2113,6 +2115,7 @@ segment_attributes_clause
       // Added to support an unusual, undocumented syntax with Oracle 19
       | table_compression
       | logging_clause
+      | inmemory_table_clause
       )+
     ;
 
@@ -2601,6 +2604,7 @@ alter_table_partitioning
     | split_table_partition
     | truncate_table_partition
     | exchange_table_partition
+    | coalesce_table_partition
     ;
 
 add_table_partition
@@ -2635,6 +2639,10 @@ exchange_table_partition
     : EXCHANGE PARTITION partition_name WITH TABLE tableview_name
             ((INCLUDING|EXCLUDING) INDEXES)?
             ((WITH | WITHOUT) VALIDATION)?
+    ;
+
+coalesce_table_partition
+    : COALESCE PARTITION parallel_clause? (allow_or_disallow CLUSTERING)?
     ;
 
 partition_extended_names
@@ -2786,7 +2794,7 @@ modify_col_substitutable
     ;
 
 add_column_clause
-    : ADD column_definition | virtual_column_definition
+    : ADD (column_definition | virtual_column_definition)
     | ADD ('(' (column_definition | virtual_column_definition) (',' (column_definition
               | virtual_column_definition)
               )*
@@ -2809,7 +2817,7 @@ varray_col_properties
 varray_storage_clause
     : STORE AS (SECUREFILE|BASICFILE)? LOB ( lob_segname? '(' lob_storage_parameters ')'
                                            | lob_segname
-                                           )
+                                           )?
     ;
 
 lob_segname
@@ -2896,6 +2904,7 @@ column_properties
     | nested_table_col_properties
     | (varray_col_properties | lob_storage_clause) //TODO '(' ( ','? lob_partition_storage)+ ')'
     | xmltype_column_properties
+    | column_properties column_properties+
     ;
 
 period_definition
@@ -4545,6 +4554,7 @@ native_datatype_element
     | HOUR
     | MINUTE
     | SECOND
+    | SDO_GEOMETRY
     | TIMEZONE_HOUR
     | TIMEZONE_MINUTE
     | TIMEZONE_REGION

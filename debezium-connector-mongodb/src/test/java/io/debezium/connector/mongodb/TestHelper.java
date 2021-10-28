@@ -10,16 +10,21 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import org.apache.kafka.connect.data.Struct;
 import org.bson.BsonDocument;
 import org.bson.BsonString;
 import org.bson.Document;
+import org.bson.types.ObjectId;
+import org.fest.assertions.Assertions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.mongodb.client.MongoDatabase;
 
 import io.debezium.config.Configuration;
+import io.debezium.config.Configuration.Builder;
 import io.debezium.connector.mongodb.ConnectionContext.MongoPrimary;
+import io.debezium.connector.mongodb.MongoDbConnectorConfig.CaptureMode;
 
 /**
  * A common test configuration options
@@ -33,10 +38,14 @@ public class TestHelper {
     private static final String TEST_PROPERTY_PREFIX = "debezium.test.";
 
     public static Configuration getConfiguration() {
-        return Configuration.fromSystemProperties("connector.").edit()
+        final Builder cfgBuilder = Configuration.fromSystemProperties("connector.").edit()
                 .withDefault(MongoDbConnectorConfig.HOSTS, "rs0/localhost:27017")
                 .withDefault(MongoDbConnectorConfig.AUTO_DISCOVER_MEMBERS, false)
-                .withDefault(MongoDbConnectorConfig.LOGICAL_NAME, "mongo1").build();
+                .withDefault(MongoDbConnectorConfig.LOGICAL_NAME, "mongo1");
+        if (isOplogCaptureMode()) {
+            cfgBuilder.withDefault(MongoDbConnectorConfig.CAPTURE_MODE, CaptureMode.OPLOG);
+        }
+        return cfgBuilder.build();
     }
 
     public static void cleanDatabase(MongoPrimary primary, String dbName) {
@@ -90,5 +99,30 @@ public class TestHelper {
 
     public static int waitTimeForRecords() {
         return Integer.parseInt(System.getProperty(TEST_PROPERTY_PREFIX + "records.waittime", "2"));
+    }
+
+    public static String captureMode() {
+        return System.getProperty(TEST_PROPERTY_PREFIX + "capture.mode", "changestreams");
+    }
+
+    public static final boolean isOplogCaptureMode() {
+        return "oplog".equals(captureMode());
+    }
+
+    public static void assertChangeStreamUpdate(ObjectId oid, Struct value, String after, List<String> removedFields,
+                                                String updatedFields) {
+        Assertions.assertThat(value.getString("after")).isEqualTo(after.replace("<OID>", oid.toHexString()));
+        Assertions.assertThat(value.getStruct("updateDescription").getString("updatedFields")).isEqualTo(updatedFields);
+        Assertions.assertThat(value.getStruct("updateDescription").getArray("removedFields")).isEqualTo(removedFields);
+    }
+
+    public static void assertChangeStreamUpdateAsDocs(ObjectId oid, Struct value, String after,
+                                                      List<String> removedFields, String updatedFields) {
+        Document expectedAfter = TestHelper.getDocumentWithoutLanguageVersion(after.replace("<OID>", oid.toHexString()));
+        Document actualAfter = TestHelper
+                .getDocumentWithoutLanguageVersion(value.getString("after"));
+        Assertions.assertThat(actualAfter).isEqualTo(expectedAfter);
+        Assertions.assertThat(value.getStruct("updateDescription").getString("updatedFields")).isEqualTo(updatedFields);
+        Assertions.assertThat(value.getStruct("updateDescription").getArray("removedFields")).isEqualTo(removedFields);
     }
 }

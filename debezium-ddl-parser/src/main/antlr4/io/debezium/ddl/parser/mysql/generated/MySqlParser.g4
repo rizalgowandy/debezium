@@ -33,12 +33,12 @@ options { tokenVocab=MySqlLexer; }
 // Top Level Description
 
 root
-    : sqlStatements? MINUSMINUS? EOF
+    : sqlStatements? (MINUS MINUS)? EOF
     ;
 
 sqlStatements
-    : (sqlStatement MINUSMINUS? SEMI? | emptyStatement)*
-    (sqlStatement (MINUSMINUS? SEMI)? | emptyStatement)
+    : (sqlStatement (MINUS MINUS)? SEMI? | emptyStatement)*
+    (sqlStatement ((MINUS MINUS)? SEMI)? | emptyStatement)
     ;
 
 sqlStatement
@@ -1084,6 +1084,7 @@ fromClause
         (WITH ROLLUP)?
       )?
       (HAVING havingExpr=expression)?
+      (WINDOW windowName AS '(' windowSpec ')' (',' windowName AS '(' windowSpec ')')*)?
     ;
 
 groupByItem
@@ -1658,6 +1659,8 @@ renameUserClause
 analyzeTable
     : ANALYZE actionOption=(NO_WRITE_TO_BINLOG | LOCAL)?
        TABLE tables
+       ( UPDATE HISTOGRAM ON fullColumnName (',' fullColumnName)* (WITH decimalLiteral BUCKETS)? )?
+       ( DROP HISTOGRAM ON fullColumnName (',' fullColumnName)* )?
     ;
 
 checkTable
@@ -1977,7 +1980,7 @@ fullColumnName
     ;
 
 indexColumnName
-    : (uid | STRING_LITERAL) ('(' decimalLiteral ')')? sortType=(ASC | DESC)?
+    : ((uid | STRING_LITERAL) ('(' decimalLiteral ')')? | expression) sortType=(ASC | DESC)?
     ;
 
 userName
@@ -2160,6 +2163,7 @@ convertedDataType
     | typeName=(DATE | DATETIME | TIME | JSON | INT | INTEGER)
     | typeName=DECIMAL lengthTwoOptionalDimension?
     | (SIGNED | UNSIGNED) INTEGER?
+    | UNSIGNED ARRAY
     ;
 
 lengthOneDimension
@@ -2245,6 +2249,7 @@ ifNotExists
 functionCall
     : specificFunction                                              #specificFunctionCall
     | aggregateWindowedFunction                                     #aggregateFunctionCall
+    | nonAggregateWindowedFunction                                  #nonAggregateFunctionCall
     | scalarFunctionName '(' functionArgs? ')'                      #scalarFunctionCall
     | fullId '(' functionArgs? ')'                                  #udfFunctionCall
     | passwordFunctionClause                                        #passwordFunctionCall
@@ -2366,19 +2371,66 @@ levelInWeightListElement
 
 aggregateWindowedFunction
     : (AVG | MAX | MIN | SUM)
-      '(' aggregator=(ALL | DISTINCT)? functionArg ')'
-    | COUNT '(' (starArg='*' | aggregator=ALL? functionArg) ')'
-    | COUNT '(' aggregator=DISTINCT functionArgs ')'
+      '(' aggregator=(ALL | DISTINCT)? functionArg ')' overClause?
+    | COUNT '(' (starArg='*' | aggregator=ALL? functionArg | aggregator=DISTINCT functionArgs) ')' overClause?
     | (
         BIT_AND | BIT_OR | BIT_XOR | STD | STDDEV | STDDEV_POP
         | STDDEV_SAMP | VAR_POP | VAR_SAMP | VARIANCE
-      ) '(' aggregator=ALL? functionArg ')'
+      ) '(' aggregator=ALL? functionArg ')' overClause?
     | GROUP_CONCAT '('
         aggregator=DISTINCT? functionArgs
         (ORDER BY
           orderByExpression (',' orderByExpression)*
         )? (SEPARATOR separator=STRING_LITERAL)?
       ')'
+    ;
+
+nonAggregateWindowedFunction
+    : (LAG | LEAD) '(' expression (',' decimalLiteral)? (',' decimalLiteral)? ')' overClause
+    | (FIRST_VALUE | LAST_VALUE) '(' expression ')' overClause
+    | (CUME_DIST | DENSE_RANK | PERCENT_RANK | RANK | ROW_NUMBER) '('')' overClause
+    | NTH_VALUE '(' expression ',' decimalLiteral ')' overClause
+    | NTILE '(' decimalLiteral ')' overClause
+    ;
+
+overClause
+    : OVER ('(' windowSpec? ')' | windowName)
+    ;
+
+windowSpec
+    : windowName? partitionClause? orderByClause? frameClause?
+    ;
+
+windowName
+    : uid
+    ;
+
+frameClause
+    : frameUnits frameExtent
+    ;
+
+frameUnits
+    : ROWS
+    | RANGE
+    ;
+
+frameExtent
+    : frameRange
+    | frameBetween
+    ;
+
+frameBetween
+    : BETWEEN frameRange AND frameRange
+    ;
+
+frameRange
+    : CURRENT ROW
+    | UNBOUNDED (PRECEDING | FOLLOWING)
+    | expression (PRECEDING | FOLLOWING)
+    ;
+
+partitionClause
+    : PARTITION BY expression (',' expression)*
     ;
 
 scalarFunctionName
@@ -2469,7 +2521,7 @@ bitOperator
     ;
 
 mathOperator
-    : '*' | '/' | '%' | DIV | MOD | '+' | '-' | '--'
+    : '*' | '/' | '%' | DIV | MOD | '+' | '-'
     ;
 
 jsonOperator

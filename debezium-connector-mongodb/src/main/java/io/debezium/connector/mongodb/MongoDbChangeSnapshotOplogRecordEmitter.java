@@ -12,7 +12,7 @@ import java.util.Map;
 import org.apache.kafka.connect.data.Struct;
 import org.bson.Document;
 
-import io.debezium.annotation.ThreadSafe;
+import io.debezium.annotation.Immutable;
 import io.debezium.data.Envelope.FieldName;
 import io.debezium.data.Envelope.Operation;
 import io.debezium.pipeline.AbstractChangeRecordEmitter;
@@ -25,7 +25,7 @@ import io.debezium.util.Clock;
  *
  * @author Chris Cranford
  */
-public class MongoDbChangeRecordEmitter extends AbstractChangeRecordEmitter<MongoDbCollectionSchema> {
+public class MongoDbChangeSnapshotOplogRecordEmitter extends AbstractChangeRecordEmitter<MongoDbCollectionSchema> {
 
     private final Document oplogEvent;
 
@@ -34,7 +34,7 @@ public class MongoDbChangeRecordEmitter extends AbstractChangeRecordEmitter<Mong
      */
     private final boolean isSnapshot;
 
-    @ThreadSafe
+    @Immutable
     private static final Map<String, Operation> OPERATION_LITERALS;
 
     static {
@@ -47,7 +47,7 @@ public class MongoDbChangeRecordEmitter extends AbstractChangeRecordEmitter<Mong
         OPERATION_LITERALS = Collections.unmodifiableMap(literals);
     }
 
-    public MongoDbChangeRecordEmitter(Partition partition, OffsetContext offsetContext, Clock clock, Document oplogEvent, boolean isSnapshot) {
+    public MongoDbChangeSnapshotOplogRecordEmitter(Partition partition, OffsetContext offsetContext, Clock clock, Document oplogEvent, boolean isSnapshot) {
         super(partition, offsetContext, clock);
         this.oplogEvent = oplogEvent;
         this.isSnapshot = isSnapshot;
@@ -66,7 +66,7 @@ public class MongoDbChangeRecordEmitter extends AbstractChangeRecordEmitter<Mong
         final Object newKey = schema.keyFromDocument(oplogEvent);
         assert newKey != null;
 
-        final Struct value = schema.valueFromDocument(oplogEvent, null, getOperation());
+        final Struct value = schema.valueFromDocumentOplog(oplogEvent, null, getOperation());
         value.put(FieldName.SOURCE, getOffset().getSourceInfo());
         value.put(FieldName.OPERATION, getOperation().code());
         value.put(FieldName.TIMESTAMP, getClock().currentTimeAsInstant().toEpochMilli());
@@ -99,7 +99,7 @@ public class MongoDbChangeRecordEmitter extends AbstractChangeRecordEmitter<Mong
         final Object newKey = schema.keyFromDocument(filter);
         assert newKey != null;
 
-        final Struct value = schema.valueFromDocument(patchObject, filter, getOperation());
+        final Struct value = schema.valueFromDocumentOplog(patchObject, filter, getOperation());
         value.put(FieldName.SOURCE, getOffset().getSourceInfo());
         value.put(FieldName.OPERATION, getOperation().code());
         value.put(FieldName.TIMESTAMP, getClock().currentTimeAsInstant().toEpochMilli());

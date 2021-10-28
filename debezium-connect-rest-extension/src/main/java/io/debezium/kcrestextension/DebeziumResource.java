@@ -12,6 +12,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.servlet.ServletContext;
 import javax.ws.rs.Consumes;
@@ -62,7 +64,9 @@ public class DebeziumResource {
     private final Herder herder;
     private final Map<String, ?> config;
 
-    private static final Version TOPIC_CREATION_KAFKA_VERSION = Version.parse("2.6.0");
+    private static final Pattern VERSION_PATTERN = Pattern
+            .compile("([1-9][0-9]*(?:(?:\\.0)*\\.[1-9][0-9]*)*)(?:-([a-zA-Z0-9]+))?(?:(\\+)(0|[1-9][0-9]*)?)?(?:-([-a-zA-Z0-9.]+))?");
+    private static final Version TOPIC_CREATION_KAFKA_VERSION = parseVersion("2.6.0");
 
     @javax.ws.rs.core.Context
     private ServletContext context;
@@ -92,6 +96,17 @@ public class DebeziumResource {
         DebeziumResource.requestTimeoutMs = Duration.ofMillis(requestTimeoutMs);
     }
 
+    public static Version parseVersion(String version) {
+        Matcher m = VERSION_PATTERN.matcher(version);
+        if (m.matches()) {
+            return Version.parse(version);
+        }
+        else if (m.lookingAt()) {
+            return Version.parse(m.group());
+        }
+        throw new IllegalArgumentException("Invalid version string: \"" + version + "\"");
+    }
+
     public static void resetRequestTimeout() {
         DebeziumResource.requestTimeoutMs = REQUEST_TIMEOUT_MS;
     }
@@ -104,7 +119,7 @@ public class DebeziumResource {
 
     private synchronized List<TransformsInfo> getTransforms() {
         if (this.transforms.isEmpty()) {
-            for (PluginDesc<Transformation> plugin : herder.plugins().transformations()) {
+            for (PluginDesc<Transformation<?>> plugin : herder.plugins().transformations()) {
                 if ("org.apache.kafka.connect.runtime.PredicatedTransformation".equals(plugin.className())) {
                     this.transforms.add(new TransformsInfo(HasHeaderKey.class.getName(), (new HasHeaderKey<>().config())));
                     this.transforms.add(new TransformsInfo(RecordIsTombstone.class.getName(), (new RecordIsTombstone<>().config())));
@@ -126,7 +141,7 @@ public class DebeziumResource {
     }
 
     private synchronized Boolean isTopicCreationEnabled() {
-        Version kafkaConnectVersion = Version.parse(AppInfoParser.getVersion());
+        Version kafkaConnectVersion = parseVersion(AppInfoParser.getVersion());
         String topicCreationProperty = (String) config.get("topic.creation.enable");
         if (null == topicCreationProperty) { // when config is not set, default to true
             topicCreationProperty = "true";

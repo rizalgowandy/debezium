@@ -90,6 +90,120 @@ public class MySqlAntlrDdlParserTest {
     }
 
     @Test
+    @FixFor("DBZ-4000")
+    public void shouldProcessCommentForTable() {
+        parser = new MysqlDdlParserWithSimpleTestListener(listener, false, true);
+        parser.parse("CREATE TABLE table1(\n"
+                + "id INT UNSIGNED NOT NULL AUTO_INCREMENT UNIQUE PRIMARY KEY COMMENT 'pk',\n"
+                + "bin_volume DECIMAL(20, 4) COMMENT 'decimal column'\n"
+                + ") COMMENT='add table comment'", tables);
+        parser.parse("CREATE TABLE table2(id INT NOT NULL)", tables);
+        parser.parse("ALTER TABLE table2 COMMENT='alter table comment'", tables);
+        assertThat(((MySqlAntlrDdlParser) parser).getParsingExceptionsFromWalker().size()).isEqualTo(0);
+        assertThat(tables.size()).isEqualTo(2);
+
+        Table table = tables.forTable(null, null, "table1");
+        assertThat(table.columnWithName("id").comment()).isEqualTo("pk");
+        assertThat(table.columnWithName("bin_volume").comment()).isEqualTo("decimal column");
+        assertThat(table.comment()).isEqualTo("add table comment");
+        table = tables.forTable(null, null, "table2");
+        assertThat(table.comment()).isEqualTo("alter table comment");
+    }
+
+    @Test
+    @FixFor("DBZ-4193")
+    public void shouldAllowAggregateWindowedFunction() {
+        String selectSql = "SELECT e.id,\n"
+                + "SUM(e.bin_volume) AS bin_volume,\n"
+                + "SUM(e.bin_volume) OVER(PARTITION BY id, e.bin_volume ORDER BY id) AS bin_volume_o,\n"
+                + "COALESCE(bin_volume, 0) AS bin_volume2,\n"
+                + "COALESCE(LAG(e.bin_volume) OVER(PARTITION BY id ORDER BY e.id), 0) AS bin_volume3,\n"
+                + "FIRST_VALUE(id) OVER() AS fv,\n"
+                + "DENSE_RANK() OVER(PARTITION BY bin_name ORDER BY id) AS drk,\n"
+                + "RANK() OVER(PARTITION BY bin_name) AS rk,\n"
+                + "ROW_NUMBER ( ) OVER(PARTITION BY bin_name) AS rn,\n"
+                + "NTILE(2) OVER() AS nt\n"
+                + "FROM table1 e";
+        parser.parse(selectSql, tables);
+        assertThat(((MySqlAntlrDdlParser) parser).getParsingExceptionsFromWalker().size()).isEqualTo(0);
+
+        selectSql = "SELECT id,\n"
+                + "SUM(bin_volume) OVER w AS bin_volume_o,\n"
+                + "LAG(bin_volume) OVER w AS bin_volume_l,\n"
+                + "LAG(bin_volume, 2) OVER w AS bin_volume_l2,\n"
+                + "FIRST_VALUE(id) OVER w2 AS fv,\n"
+                + "GROUP_CONCAT(bin_volume order by id) AS `rank`\n"
+                + "FROM table1\n"
+                + "WINDOW w AS (PARTITION BY id, bin_volume ORDER BY id ROWS UNBOUNDED PRECEDING),\n"
+                + "w2 AS (PARTITION BY id, bin_volume ORDER BY id DESC ROWS 10 PRECEDING)";
+        parser.parse(selectSql, tables);
+        assertThat(((MySqlAntlrDdlParser) parser).getParsingExceptionsFromWalker().size()).isEqualTo(0);
+    }
+
+    @Test
+    @FixFor("DBZ-4166")
+    public void shouldAllowIndexExpressionForTable() {
+        String ddlSql = "CREATE TABLE `cached_sales` (\n"
+                + "`id` bigint unsigned NOT NULL AUTO_INCREMENT,\n"
+                + "`sale_id` bigint unsigned NOT NULL,\n"
+                + "`sale_item_id` bigint unsigned NOT NULL,\n"
+                + "`retailer_id` bigint unsigned DEFAULT NULL,\n"
+                + "`retailer_branch_id` bigint unsigned DEFAULT NULL,\n"
+                + "`retailer_branch_location_id` bigint unsigned NOT NULL,\n"
+                + "`sales_area_id` bigint unsigned DEFAULT NULL,\n"
+                + "`product_id` bigint unsigned DEFAULT NULL,\n"
+                + "`product_variation_id` bigint unsigned NOT NULL,\n"
+                + "`season_ids` json DEFAULT NULL,\n"
+                + "`category_ids` json DEFAULT NULL,\n"
+                + "`color_ids` json DEFAULT NULL,\n"
+                + "`size_ids` json DEFAULT NULL,\n"
+                + "`gender_ids` json DEFAULT NULL,\n"
+                + "`city` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n"
+                + "`country_code` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n"
+                + "`location_type` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n"
+                + "`edi_enabled` tinyint(1) DEFAULT NULL,\n"
+                + "`quantity` int DEFAULT NULL,\n"
+                + "`brand_normalized_purchase_price_net` int DEFAULT NULL,\n"
+                + "`brand_normalized_selling_price_gross` int DEFAULT NULL,\n"
+                + "`item_updated_at` datetime DEFAULT NULL,\n"
+                + "`sold_at` datetime DEFAULT NULL,\n"
+                + "`created_at` timestamp NULL DEFAULT NULL,\n"
+                + "`updated_at` timestamp NULL DEFAULT NULL,\n"
+                + "`tenant_id` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n"
+                + "PRIMARY KEY (`id`),\n"
+                + "UNIQUE KEY `cached_sales_sale_item_id_unique` (`sale_item_id`),\n"
+                + "KEY `cached_sales_sale_id_foreign` (`sale_id`),\n"
+                + "KEY `cached_sales_retailer_id_foreign` (`retailer_id`),\n"
+                + "KEY `cached_sales_retailer_branch_id_foreign` (`retailer_branch_id`),\n"
+                + "KEY `cached_sales_retailer_branch_location_id_foreign` (`retailer_branch_location_id`),\n"
+                + "KEY `cached_sales_sales_area_id_foreign` (`sales_area_id`),\n"
+                + "KEY `cached_sales_product_id_foreign` (`product_id`),\n"
+                + "KEY `cached_sales_product_variation_id_foreign` (`product_variation_id`),\n"
+                + "KEY `cached_sales_city_index` (`city`),\n"
+                + "KEY `cached_sales_country_code_index` (`country_code`),\n"
+                + "KEY `cached_sales_location_type_index` (`location_type`),\n"
+                + "KEY `cached_sales_sold_at_index` (`sold_at`),\n"
+                + "KEY `cached_sales_season_ids_index` ((cast(json_extract(`season_ids`,_utf8mb4'$') as unsigned array))),\n"
+                + "KEY `cached_sales_category_ids_index` ((cast(json_extract(`category_ids`,_utf8mb4'$') as unsigned array))),\n"
+                + "KEY `cached_sales_color_ids_index` ((cast(json_extract(`color_ids`,_utf8mb4'$') as unsigned array))),\n"
+                + "KEY `cached_sales_size_ids_index` ((cast(json_extract(`size_ids`,_utf8mb4'$') as unsigned array))),\n"
+                + "KEY `cached_sales_gender_ids_index` (((cast(json_extract(`gender_ids`,_utf8mb4'$') as unsigned array))))\n"
+                + ") ENGINE=InnoDB AUTO_INCREMENT=13594436 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        parser.parse(ddlSql, tables);
+        assertThat(((MySqlAntlrDdlParser) parser).getParsingExceptionsFromWalker().size()).isEqualTo(0);
+
+        ddlSql = "CREATE TABLE tbl (\n"
+                + "col1 LONGTEXT,\n"
+                + "data JSON,\n"
+                + "INDEX idx1 ((SUBSTRING(col1, 1, 10))),\n"
+                + "INDEX idx2 ((CAST(JSON_EXTRACT(data, _utf8mb4'$') AS UNSIGNED ARRAY))),\n"
+                + "INDEX ((CAST(data->>'$.name' AS CHAR(30))))\n"
+                + ")";
+        parser.parse(ddlSql, tables);
+        assertThat(((MySqlAntlrDdlParser) parser).getParsingExceptionsFromWalker().size()).isEqualTo(0);
+    }
+
+    @Test
     @FixFor("DBZ-3020")
     public void shouldProcessExpressionWithDefault() {
         String ddl = "create table rack_shelf_bin ( id int unsigned not null auto_increment unique primary key, bin_volume decimal(20, 4) default (bin_len * bin_width * bin_height));";
@@ -2969,16 +3083,21 @@ public class MySqlAntlrDdlParserTest {
         }
 
         public MysqlDdlParserWithSimpleTestListener(DdlChanges changesListener, TableFilter tableFilter) {
-            this(changesListener, false, tableFilter);
+            this(changesListener, false, false, tableFilter);
         }
 
         public MysqlDdlParserWithSimpleTestListener(DdlChanges changesListener, boolean includeViews) {
-            this(changesListener, includeViews, TableFilter.includeAll());
+            this(changesListener, includeViews, false, TableFilter.includeAll());
         }
 
-        private MysqlDdlParserWithSimpleTestListener(DdlChanges changesListener, boolean includeViews, TableFilter tableFilter) {
+        public MysqlDdlParserWithSimpleTestListener(DdlChanges changesListener, boolean includeViews, boolean includeComments) {
+            this(changesListener, includeViews, includeComments, TableFilter.includeAll());
+        }
+
+        private MysqlDdlParserWithSimpleTestListener(DdlChanges changesListener, boolean includeViews, boolean includeComments, TableFilter tableFilter) {
             super(false,
                     includeViews,
+                    includeComments,
                     new MySqlValueConverters(
                             JdbcValueConverters.DecimalMode.DOUBLE,
                             TemporalPrecisionMode.ADAPTIVE_TIME_MICROSECONDS,
